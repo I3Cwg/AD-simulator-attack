@@ -183,7 +183,7 @@ lsadump::dcsync /domain:wazuhtest.com /user:krbtgt
    * If the command returns the **NTLM hash** for the **KRBTGT** account, the attack is successful.
    * This hash is a critical component for performing a **Golden Ticket** attack.
 
-![DCSync Attack](/assets/mage-4.png)
+![DCSync Attack](/assets/image-4.png)
 ![NTLM Hash Extraction](/assets/image-5.png)
 
 ---
