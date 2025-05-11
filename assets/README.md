@@ -197,7 +197,9 @@ This section covers the simulation of common Active Directory (AD) attacks, incl
 
 ### 💣 **1. DCSync Attack**
 
-DCSync is an attack technique that allows an attacker to simulate the behavior of a Domain Controller (DC) to extract sensitive data, like user credentials, from Active Directory.
+DCSync is an attack that threat agents utilize to impersonate a Domain Controller and perform replication with a targeted Domain Controller to extract password hashes from Active Directory. The attack can be performed both from the perspective of a user account or a computer, as long as they have the necessary permissions assigned, which are:
+* **Replicating Directory Changes**
+* **Replicating Directory Changes All**
 
 **📌 Prerequisites:**
 
@@ -222,16 +224,33 @@ lsadump::dcsync /domain:wazuhtest.com /user:krbtgt
 ![DCSync Attack](/assets/image-4.png)
 ![NTLM Hash Extraction](/assets/image-5.png)
 
+#### **Prevention**
+What DCSync abuses is a common operation in Active Directory environments, as replications happen between Domain Controllers all the time; therefore, preventing DCSync out of the box is not an option. The only prevention technique against this attack is using solutions such as the [RPC Firewall](https://github.com/zeronetworks/rpcfirewall), a third-party product that can block or allow specific RPC calls with robust granularity. For example, using RPC Firewall , we can only allow replications from Domain Controllers.
+
+#### **Detection**
+Detecting DCSync is easy because each Domain Controller replication generates an event with the ID 4662 . We can pick up abnormal requests immediately by monitoring for this event ID and checking whether the initiator account is a Domain Controller. Here's the event generated from earlier when we ran Mimikatz ; it serves as a flag that a user account is performing this replication attempt:
+
+![alt text](/assets/image-27.png)
+
+Since replications occur constantly, we can avoid false positives by ensuring the followings:
+- Either the property 1131f6ad-9c07-11d1-f79f-00c04fc2dcd2 or 19195a5b-6da0-11d0-afd3-00c04fd930c9 is [present in the event](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/1522b774-6464-41a3-87a5-1e5633c3fbbb).
+- Whitelisting systems/accounts with a (valid) business reason for replicating, such as Azure AD Connect (this service constantly replicates Domain Controllers and sends the obtained password hashes to Azure AD).
+
 ---
 
 ### 🎭 **2. Golden Ticket Attack**
 
-A **Golden Ticket** attack allows an attacker to forge Kerberos tickets, granting them unrestricted access to Active Directory resources. This attack relies on the NTLM hash extracted from the **KRBTGT** account in the **DCSync** attack.
+Golden Ticket is an attack technique that allows an attacker to create valid TGT (Ticket Granting Ticket) for any user within a domain by using the password hash of the krbtgt account. The krbtgt account is a special system account used to sign all Kerberos tickets within the domain, and it cannot be deleted, renamed, or activated. If an attacker obtains this hash, they can generate TGTs with any privileges and maintain long-term access to the domain, including escalating from a child domain to a parent domain within the same forest.
 
 **📌 Prerequisites:**
 
-* The **KRBTGT** account hash obtained from the previous DCSync attack.
-* The **Domain SID** of the target domain.
+To perform a Kerberoasting attack, you need:
+* /domain : the domain name of the target system (e.g., **wazuhtest.com**).
+* /sid : the domain SID of the target system (e.g., **S-1-5-21-1234567890-1234567890-1234567890**).
+* /rc4 : the NTLM hash of the krbtgt account (e.g., **D4C74594D841139D0F3C6A1A8E2B4B7F**).
+* user: The username for which Mimikatz will issue the ticket (Windows 2019 blocks tickets if they are for inexistent users.)
+* /id :  Relative ID (last part of SID ) for the user for whom Mimikatz will issue the ticket
+
 
 **⚙️ Steps:**
 
@@ -266,6 +285,47 @@ klist
 * Check if the ticket is currently loaded in memory, confirming the ticket was successfully forged.
 
 ![Kerberos Ticket Verification](/assets/image-8.png)
+
+#### **Prevention**
+
+Preventing the creation of forged tickets is difficult as the KDC generates valid tickets using the same procedure. Therefore, once an attacker has all the required information, they can forge a ticket. Nonetheless, there are a few things we can and should do: 
+- Block privileged users from authenticating to any device. 
+- Periodically reset the password of the krbtgt account; the secrecy of this hash value is crucial to Active Directory. When resetting the password of krbtgt (regardless of the password's strength), it will always be overwritten with a new randomly generated and cryptographically secure one. Utilizing Microsoft's script for changing the password of krbtgt [KrbtgtKeys.ps1]([https://](https://github.com/microsoft/New-KrbtgtKeys.ps1)) is highly recommended as it has an audit mode that checks the domain for preventing impacts upon password change. It also forces DC replication across the globe so all Domain Controllers sync the new value instantly, reducing potential business disruptions. 
+- Enforce SIDHistory filtering between the domains in forests to prevent the escalation from a child domain to a parent domain (because the escalation path involves abusing the SIDHistory property by setting it to that of a privileged group, for example, Enterprise Admins ). However, doing this may result in potential issues in migrating domains
+
+#### Detection
+
+Correlating user behavior is one of the most effective techniques for detecting forged ticket abuse. For instance, if we have a baseline of when and where a privileged account, like 'Administrator,' typically logs in, we can set alerts for any suspicious activity outside this pattern. Organizations using Privileged Access Workstations (PAWs) should closely monitor any privileged logins from non-PAW devices. Key event IDs to watch include 4624 (successful logon) and 4625 (failed logon).
+
+While Domain Controllers do not log events when an attacker creates a Golden Ticket on a compromised machine, they will log successful logon attempts when the attacker uses the forged ticket to access other systems. For example:
+
+* **Unusual Successful Logon (Event ID 4624)**
+
+  * An unexpected login from a new IP address or device, indicating a possible Golden Ticket attack.
+
+![alt text](/assets/image-28.png)
+
+* **TGS Requests Without Prior TGT**
+
+  * Signs include TGS requests for an account like 'Administrator' without a corresponding TGT, or a TGT with an unusually long lifetime (e.g., 10 years).
+  * **Example:** An attacker using a forged Golden Ticket with the `krbtgt` hash to request TGS for 'Administrator'.
+
+* **SID Changes in Kerberos Tickets (Event ID 4675)**
+
+  * A TGT or TGS containing an SID that differs from the current domain SID, indicating possible cross-domain privilege escalation.
+  * **Example:** An account from the child domain `child.example.com` attempting to access the parent domain `example.com`.
+
+* **Direct File Access (Event ID 5140)**
+
+  * Direct attempts to access administrative shares (e.g., `C$` on a Domain Controller), often associated with lateral movement.
+  * **Examples:**
+
+    ```powershell
+    dir \\dc1\c$
+    Get-ChildItem \\dc1\c$
+    ```
+  * **Analysis:** These actions often indicate attempts to move laterally within the network.
+
 
 ---
 
@@ -404,7 +464,7 @@ mimikatz # sekurlsa::pth /user:Administrator /domain:wazuhtest.com /ntlm:<NTLM h
 * Reattempt the connection to the domain controller.
 * This time, the command should succeed, providing a remote shell with the privileges of the compromised domain administrator account.
 
-![Successful Domain Controller Access](image-21.png)
+![Successful Domain Controller Access](/assets/image-21.png)
 
 7. **Verify the Session:**
 
